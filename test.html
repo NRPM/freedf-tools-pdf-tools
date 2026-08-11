@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<title>FreeDF Tools — E2E Test Harness</title>
+<style>
+body { font-family: monospace; background: #161616; color: #e8e8ee; padding: 20px; }
+h1 { color: #e5322d; font-size: 18px; }
+.pass { color: #4acd86; }
+.fail { color: #e5322d; }
+.warn { color: #f5a623; }
+#results div { margin: 2px 0; }
+#errors { border: 1px solid #e5322d; padding: 10px; margin-top: 10px; white-space: pre-wrap; }
+button { margin: 10px 0; padding: 8px 16px; }
+</style>
+</head>
+<body>
+<h1>E2E Test Harness</h1>
+<button id="theme-toggle" type="button">Toggle theme</button>
+<div id="results">Running…</div>
+<div id="errors" style="display:none"></div>
+
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="./js/theme.js"></script>
+<script src="./js/tools/pdf-core.js"></script>
+<script src="./js/tools/organize.js"></script>
+<script src="./js/tools/optimize.js"></script>
+<script src="./js/tools/convert.js"></script>
+<script src="./js/tools/edit.js"></script>
+<script src="./js/tools/security.js"></script>
+<script src="./js/tools/intelligence.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.PDFCore;
+  var results = document.getElementById('results');
+  var errorsBox = document.getElementById('errors');
+  var errors = [];
+  var passCount = 0, failCount = 0;
+
+  window.addEventListener('error', function (e) {
+    errors.push('window.onerror: ' + e.message + ' @ ' + (e.filename || '') + ':' + e.lineno);
+    errorsBox.style.display = 'block';
+    errorsBox.textContent = errors.join('\n');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    errors.push('unhandledrejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+    errorsBox.style.display = 'block';
+    errorsBox.textContent = errors.join('\n');
+  });
+
+  function log(cls, msg) {
+    var d = document.createElement('div');
+    d.className = cls;
+    d.textContent = msg;
+    results.appendChild(d);
+  }
+  function ok(msg) { passCount++; log('pass', 'PASS ' + msg); }
+  function bad(msg) { failCount++; log('fail', 'FAIL ' + msg); }
+  function warn(msg) { log('warn', 'WARN ' + msg); }
+
+  function check(name, cond, detail) {
+    if (cond) ok(name + (detail ? ' — ' + detail : ''));
+    else bad(name + (detail ? ' — ' + detail : ''));
+  }
+
+  var ui = { progress: function () {} };
+
+  function fileFromBytes(bytes, name, mime) {
+    return { file: new File([bytes], name, { type: mime }), name: name, size: bytes.byteLength, bytes: bytes };
+  }
+
+  function loadPdfBytes(bytes) {
+    return window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+  }
+
+  var suite = [];
+
+  /* ---------- Theme tests (JS logic; CSS keyframes verified on index page) ---------- */
+  suite.push(function () {
+    var root = document.documentElement;
+    check('theme: initial data-theme is dark', root.getAttribute('data-theme') === 'dark', root.getAttribute('data-theme'));
+    var btn = document.getElementById('theme-toggle');
+    btn.click();
+    check('theme: toggle -> light', root.getAttribute('data-theme') === 'light');
+    check('theme: theme-anim class added on toggle', root.classList.contains('theme-anim'));
+    var bgLight = getComputedStyle(document.body).backgroundColor;
+    btn.click();
+    check('theme: toggle back -> dark', root.getAttribute('data-theme') === 'dark');
+    check('theme: theme-anim re-added for second flip', root.classList.contains('theme-anim'));
+    var bgDark = getComputedStyle(document.body).backgroundColor;
+    check('theme: persisted in localStorage', localStorage.getItem('freedf-theme') === 'dark');
+  });
+
+  /* ---------- Merge ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOrganize.merge.process([f, f], { order: [0, 1] }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('merge: output is valid PDF, 6 pages', doc.getPageCount() === 6, doc.getPageCount() + ' pages, ' + res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Split ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOrganize.split.process([f], { mode: 'range', splitType: 'custom', ranges: '1-2, 3', output: 'separate' }, ui).then(function (res) {
+        check('split: produced 2 parts', res.zip.length === 2, res.zip.length);
+        return loadPdfBytes(res.zip[0].bytes).then(function (d1) {
+          return loadPdfBytes(res.zip[1].bytes).then(function (d2) {
+            check('split: part1 has 2 pages, part2 has 1', d1.getPageCount() === 2 && d2.getPageCount() === 1, d1.getPageCount() + '/' + d2.getPageCount());
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- Compress ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOptimize.compress.process([f], { level: 'recommended', quality: '0.7' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('compress: valid PDF with 3 pages', doc.getPageCount() === 3, doc.getPageCount() + ' pages, ' + res.bytes.byteLength + ' bytes (orig ' + buf.byteLength + ')');
+        });
+      });
+    });
+  });
+
+  /* ---------- Rotate ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOrganize.rotate.process([f], { scope: 'all', direction: 'right', orientation: 'none' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          var ang = doc.getPage(0).getRotation().angle;
+          check('rotate: page 0 rotated 90°', ang === 90, ang);
+        });
+      });
+    });
+  });
+
+  /* ---------- JPG -> PDF ---------- */
+  suite.push(function () {
+    return fetch('test.png').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.png', 'image/png');
+      return window.ToolConvert.jpgToPdf.process([f], { orientation: 'auto', size: 'fit', margin: 'none' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('jpg->pdf: valid PDF, 1 page', doc.getPageCount() === 1, doc.getPageCount() + ' pages, ' + res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF -> JPG ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToJpg.process([f], { mode: 'page', quality: 'recommended' }, ui).then(function (res) {
+        check('pdf->jpg: 3 jpg files', res.zip.length === 3, res.zip.length);
+        var allJpeg = res.zip.every(function (p) {
+          return p.bytes[0] === 0xFF && p.bytes[1] === 0xD8;
+        });
+        check('pdf->jpg: all files are JPEG', allJpeg);
+      });
+    });
+  });
+
+  /* ---------- Watermark ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolEdit.watermark.process([f], { wmType: 'text', wmText: 'CONFIDENTIAL', wmFont: 'Helvetica', wmSize: '60', wmColor: '#e5322d', wmOpacity: '0.3', wmPos: 'center', wmRot: '45' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('watermark: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Page numbers ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolEdit.pageNumbers.process([f], { pnMode: 'single', pnPos: 'bottom-center', pnMargin: 'small', pnFirst: '1', pnPages: 'all', pnFormat: 'number' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('page-numbers: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Protect + Unlock ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolSecurity.protect.process([f], { password: 'secret123', print: true, modify: true, copy: true, comments: true, forms: true, access: true, assembly: true }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('protect: output is encrypted', doc.isEncrypted === true, 'isEncrypted=' + doc.isEncrypted);
+          return window.ToolSecurity.unlock.process([fileFromBytes(res.bytes, 'protected.pdf', 'application/pdf')], { password: 'secret123' }, ui).then(function (res2) {
+            return loadPdfBytes(res2.bytes).then(function (doc2) {
+              check('unlock: decrypted, 3 pages', doc2.isEncrypted === false && doc2.getPageCount() === 3, 'encrypted=' + doc2.isEncrypted);
+            });
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF -> Word (docx) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToWord.process([f], { ocr: 'off' }, ui).then(function (res) {
+        return res.blob.arrayBuffer().then(function (b) {
+          return window.JSZip.loadAsync(b).then(function (zip) {
+            check('pdf->word: valid docx with document.xml', !!zip.file('word/document.xml'), res.name);
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF -> Excel (xlsx) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToExcel.process([f], { layout: 'one', ocr: 'off' }, ui).then(function (res) {
+        return res.blob.arrayBuffer().then(function (b) {
+          return window.JSZip.loadAsync(b).then(function (zip) {
+            check('pdf->excel: valid xlsx with sheet1', !!zip.file('xl/worksheets/sheet1.xml'), res.name);
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF -> PowerPoint (pptx) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToPpt.process([f], { ocr: 'off' }, ui).then(function (res) {
+        return res.blob.arrayBuffer().then(function (b) {
+          return window.JSZip.loadAsync(b).then(function (zip) {
+            check('pdf->ppt: valid pptx with slide1', !!zip.file('ppt/slides/slide1.xml'), res.name);
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF -> Markdown ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToMarkdown.process([f], {}, ui).then(function (res) {
+        return res.blob.text().then(function (md) {
+          check('pdf->markdown: contains page text', md.indexOf('Test PDF Page') !== -1, md.slice(0, 60).replace(/\n/g, ' | '));
+        });
+      });
+    });
+  });
+
+  /* ---------- Summarizer ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolIntelligence.summarizer.process([f], { sumLen: 'medium' }, ui).then(function (res) {
+        check('summarizer: produced text', res.text && res.text.length > 20, res.text.slice(0, 80));
+      });
+    });
+  });
+
+  /* ---------- Translate ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolIntelligence.translate.process([f], { to: 'es' }, ui).then(function (res) {
+        check('translate: produced text', res.text && res.text.length > 20, res.text.slice(0, 80));
+      });
+    });
+  });
+
+  /* ---------- Redact ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolSecurity.redact.process([f], { text: 'fox', email: false, phone: false, cc: false }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('redact: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Repair ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOptimize.repair.process([f], {}, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('repair: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- PDF/A ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolConvert.pdfToPdfa.process([f], { pdfaLevel: '2b' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('pdfa: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Remove pages ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOrganize.removePages.process([f], { removePages: [1] }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('remove-pages: 2 pages left', doc.getPageCount() === 2, doc.getPageCount());
+        });
+      });
+    });
+  });
+
+  /* ---------- Organize (reorder + rotate) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolOrganize.organize.process([f], { order: [{ srcIndex: 2, rotation: 0 }, { srcIndex: 0, rotation: 90 }, { srcIndex: 1, rotation: 0 }] }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('organize: 3 pages, page2 rotated 90', doc.getPageCount() === 3 && doc.getPage(1).getRotation().angle === 90, doc.getPageCount() + ' pages');
+        });
+      });
+    });
+  });
+
+  /* ---------- Crop ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolEdit.crop.process([f], { cropRect: { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 }, cropScope: 'all', currentPage: 0 }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          var box = doc.getPage(0).getCropBox();
+          check('crop: cropbox applied', box.width < 612 && box.height < 792, box.width + 'x' + box.height);
+        });
+      });
+    });
+  });
+
+  /* ---------- Edit (annotations) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolEdit.edit.process([f], { annotations: [{ type: 'text', text: 'HELLO', x: 100, y: 100, page: 0, scale: 1.5, color: '#e5322d', size: 18 }] }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('edit: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Compare ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      return window.ToolSecurity.compare.process([f, f], { cmpMode: 'semantic' }, ui).then(function (res) {
+        check('compare: diff produced', Array.isArray(res.diff) && res.diff.length > 0, res.diff.length + ' lines');
+      });
+    });
+  });
+
+  /* ---------- Word -> PDF (roundtrip via buildDocx) ---------- */
+  suite.push(function () {
+    return C.buildDocx(['Hello World', 'This is a test document.']).then(function (blob) {
+      return blob.arrayBuffer().then(function (b) {
+        var f = fileFromBytes(b, 'test.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        return window.ToolConvert.wordToPdf.process([f], {}, ui).then(function (res) {
+          return loadPdfBytes(res.bytes).then(function (doc) {
+            check('word->pdf: valid PDF', doc.getPageCount() >= 1, res.bytes.byteLength + ' bytes');
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- Excel -> PDF (roundtrip via buildXlsx) ---------- */
+  suite.push(function () {
+    return C.buildXlsx([['Name', 'Value'], ['Alpha', '1'], ['Beta', '2']]).then(function (blob) {
+      return blob.arrayBuffer().then(function (b) {
+        var f = fileFromBytes(b, 'test.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        return window.ToolConvert.excelToPdf.process([f], { orientation: 'portrait' }, ui).then(function (res) {
+          return loadPdfBytes(res.bytes).then(function (doc) {
+            check('excel->pdf: valid PDF', doc.getPageCount() >= 1, res.bytes.byteLength + ' bytes');
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- PPT -> PDF (roundtrip via buildPptx) ---------- */
+  suite.push(function () {
+    return C.buildPptx(['Slide one content', 'Slide two content']).then(function (blob) {
+      return blob.arrayBuffer().then(function (b) {
+        var f = fileFromBytes(b, 'test.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+        return window.ToolConvert.pptToPdf.process([f], {}, ui).then(function (res) {
+          return loadPdfBytes(res.bytes).then(function (doc) {
+            check('ppt->pdf: valid PDF', doc.getPageCount() >= 1, res.bytes.byteLength + ' bytes');
+          });
+        });
+      });
+    });
+  });
+
+  /* ---------- Scan to PDF ---------- */
+  suite.push(function () {
+    return fetch('test.png').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.png', 'image/png');
+      return window.ToolConvert.scanToPdf.process([f], { orientation: 'auto', size: 'a4', margin: 'small' }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('scan->pdf: valid PDF, 1 page', doc.getPageCount() === 1, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- Sign (with a drawn signature data URL) ---------- */
+  suite.push(function () {
+    return fetch('test.pdf').then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
+      var f = fileFromBytes(buf, 'test.pdf', 'application/pdf');
+      // Build a signature data URL from a canvas
+      var cv = document.createElement('canvas');
+      cv.width = 200; cv.height = 80;
+      var ctx = cv.getContext('2d');
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(20, 60); ctx.quadraticCurveTo(60, 10, 100, 50); ctx.quadraticCurveTo(140, 90, 180, 20); ctx.stroke();
+      var dataUrl = cv.toDataURL('image/png');
+      return window.ToolSecurity.sign.process([f], { signType: 'simple', signers: 'me', signatureDataUrl: dataUrl }, ui).then(function (res) {
+        return loadPdfBytes(res.bytes).then(function (doc) {
+          check('sign: valid PDF, 3 pages', doc.getPageCount() === 3, res.bytes.byteLength + ' bytes');
+        });
+      });
+    });
+  });
+
+  /* ---------- HTML -> PDF (text fallback path) ---------- */
+  suite.push(function () {
+    return window.ToolConvert.htmlToPdf.process([], { htmlText: '<h1>Hello</h1><p>This is HTML content.</p>' }, ui).then(function (res) {
+      return loadPdfBytes(res.bytes).then(function (doc) {
+        check('html->pdf: valid PDF', doc.getPageCount() >= 1, res.bytes.byteLength + ' bytes');
+      });
+    });
+  });
+
+  /* ---------- Run ---------- */
+  function runSuite() {
+    var chain = Promise.resolve();
+    suite.forEach(function (fn, i) {
+      chain = chain.then(function () {
+        return Promise.resolve().then(fn).catch(function (e) {
+          bad('test #' + (i + 1) + ' threw: ' + (e && e.message ? e.message : e));
+        });
+      });
+    });
+    chain.then(function () {
+      var d = document.createElement('div');
+      d.style.cssText = 'margin-top:16px;font-weight:bold;font-size:16px';
+      d.className = failCount === 0 ? 'pass' : 'fail';
+      d.textContent = 'RESULT: ' + passCount + ' passed, ' + failCount + ' failed, ' + errors.length + ' console errors';
+      results.appendChild(d);
+      if (errors.length) {
+        errorsBox.style.display = 'block';
+        errorsBox.textContent = errors.join('\n');
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', runSuite);
+  } else {
+    runSuite();
+  }
+})();
+</script>
+</body>
+</html>

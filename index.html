@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FreeDF Tools — Every tool you need to work with PDFs, 100% free</title>
+<meta name="description" content="Every tool you need to use PDFs, at your fingertips. All are 100% FREE and easy to use! Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e5322d' d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/svg%3E">
+<script>
+/* Theme bootstrap: dark is the default. Runs before CSS paint to prevent any flash. */
+(function () {
+  var theme = 'dark';
+  try {
+    var saved = localStorage.getItem('freedf-theme');
+    if (saved === 'light') theme = 'light';
+  } catch (e) { /* storage unavailable — stay dark */ }
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="#home" data-nav="home" aria-label="FreeDF Tools home">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="#e5322d" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+      <span class="logo-text">Free<span class="logo-accent">DF</span> Tools</span>
+    </a>
+
+    <nav class="main-nav" id="main-nav" aria-label="Main navigation">
+      <a class="nav-link" href="#tool-merge" data-goto="merge">Merge PDF</a>
+      <a class="nav-link" href="#tool-split" data-goto="split">Split PDF</a>
+      <a class="nav-link" href="#tool-compress" data-goto="compress">Compress PDF</a>
+      <div class="dropdown">
+        <button class="nav-link dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false">Convert PDF <svg class="caret" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="dropdown-menu" id="dd-convert" role="menu"></div>
+      </div>
+      <div class="dropdown">
+        <button class="nav-link dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false">All PDF tools <svg class="caret" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="dropdown-menu dropdown-menu-wide" id="dd-all" role="menu"></div>
+      </div>
+    </nav>
+
+    <div class="header-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="hamburger" id="hamburger" type="button" aria-label="Open menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ============ HOME ============ -->
+  <section id="view-home" class="view">
+    <div class="hero">
+      <div class="hero-inner">
+        <h1>Every tool you need to work with PDFs in one place</h1>
+        <p class="hero-sub">Every tool you need to use PDFs, at your fingertips. All are 100% FREE and easy to use! Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.</p>
+        <div class="hero-dropzone" id="hero-dropzone">
+          <button class="btn btn-primary btn-lg" id="hero-select" type="button">Select PDF files</button>
+          <p class="hero-drop-hint">Upload from computer. <span>or drop PDFs here</span></p>
+          <input type="file" id="hero-file" accept=".pdf,application/pdf" multiple hidden>
+        </div>
+        <p class="hero-trust">100% free · No sign-up · Files never leave your device</p>
+      </div>
+    </div>
+
+    <section class="tool-grid-section">
+      <div class="tool-grid-inner">
+        <h2>Every tool you need</h2>
+        <div class="category-tabs" id="category-tabs" role="tablist" aria-label="Filter tools by category">
+          <button class="tab active" data-cat="all" role="tab" aria-selected="true">All</button>
+          <button class="tab" data-cat="convert" role="tab" aria-selected="false">Convert</button>
+          <button class="tab" data-cat="organize" role="tab" aria-selected="false">Organize</button>
+          <button class="tab" data-cat="optimize" role="tab" aria-selected="false">Optimize</button>
+          <button class="tab" data-cat="edit" role="tab" aria-selected="false">Edit</button>
+          <button class="tab" data-cat="security" role="tab" aria-selected="false">Security</button>
+        </div>
+        <div class="tool-grid" id="tool-grid"></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ============ TOOL WORKSPACES (generated by js/app.js) ============ -->
+  <div id="workspaces" class="workspaces"></div>
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner footer-legal">
+    <a href="#" class="footer-legal-link" data-modal="privacy">Privacy Policy</a>
+    <span class="footer-sep" aria-hidden="true">·</span>
+    <a href="#" class="footer-legal-link" data-modal="terms">Terms of Service</a>
+  </div>
+  <div class="footer-bottom">
+    <p>© 2026 FreeDF Tools ® — Your PDF Editor. 100% free, runs entirely in your browser.</p>
+  </div>
+</footer>
+
+<!-- Legal modal -->
+<div class="modal-overlay" id="legal-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button class="modal-close" type="button" aria-label="Close dialog">✕</button>
+    <h2 id="modal-title"></h2>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Vendor libraries (CDN — client-side, GitHub Pages friendly) -->
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+
+<!-- App scripts -->
+<script src="./js/theme.js"></script>
+<script src="./js/tools/pdf-core.js"></script>
+<script src="./js/tools/pdf-encrypt.js"></script>
+<script src="./js/tools/pdf-decrypt.js"></script>
+<script src="./js/tools/organize.js"></script>
+<script src="./js/tools/optimize.js"></script>
+<script src="./js/tools/convert.js"></script>
+<script src="./js/tools/edit.js"></script>
+<script src="./js/tools/security.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
