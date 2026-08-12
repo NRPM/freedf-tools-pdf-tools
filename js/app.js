@@ -108,7 +108,10 @@
   }
 
   /* ---------------- Workspace construction ---------------- */
-  var wsState = {}; // id -> { files: [], order: [], selected: {}, rotations: {}, annotations: [], ... }
+  var wsState = {}; // id -> { files: [], order: [], selected: {}, rotations: {}, thumbCache: {}, annotations: [], ... }
+  // Debug/testing hook (read-only by convention): lets verification harnesses
+  // inspect per-tool workspace state. No behavior change.
+  window.__wsState = wsState;
 
   function buildWorkspace(t) {
     var ws = el('div', 'workspace');
@@ -142,7 +145,7 @@
       '<div class="result-wrap" data-result></div>';
 
     $('#workspaces').appendChild(ws);
-    wsState[t.id] = { files: [], selected: {}, order: [], rotations: {}, annotations: [], currentPage: 0, cropRect: null, signatureDataUrl: null, formValues: {} };
+    wsState[t.id] = { files: [], selected: {}, order: [], rotations: {}, thumbCache: {}, _pdfJsPromise: null, annotations: [], currentPage: 0, cropRect: null, signatureDataUrl: null, formValues: {} };
 
     initDropzone(ws, t);
     initFileList(ws, t);
@@ -184,6 +187,8 @@
       st.selected = {};
       st.order = [];
       st.rotations = {};
+      st.thumbCache = {};
+      st._pdfJsPromise = null;
       st.annotations = [];
       st.currentPage = 0;
       st.cropRect = null;
@@ -226,6 +231,8 @@
         st.selected = {};
         st.order = [];
         st.rotations = {};
+        st.thumbCache = {};
+        st._pdfJsPromise = null;
         st.annotations = [];
         st.currentPage = 0;
         st.cropRect = null;
@@ -426,7 +433,17 @@
     var st = wsState[t.id];
     if (t.id === 'merge') opts.order = st.files.map(function (_, i) { return i; });
     if (t.id === 'organize') {
-      opts.order = st.order.length ? st.order : st.files.map(function (_, i) { return { srcIndex: i, rotation: 0 }; });
+      if (!st.order || !st.order.length) {
+        // Prefer per-page init from the known page count; fall back to the
+        // (pre-existing) per-file shape only when the page count is unknown.
+        if (st.totalPages) {
+          st.order = [];
+          for (var oi2 = 0; oi2 < st.totalPages; oi2++) st.order.push({ srcIndex: oi2, rotation: 0 });
+        } else {
+          st.order = st.files.map(function (_, i) { return { srcIndex: i, rotation: 0 }; });
+        }
+      }
+      opts.order = st.order;
     }
     if (t.id === 'remove-pages') {
       opts.removePages = Object.keys(st.selected).map(Number).sort(function (a, b) { return a - b; });
@@ -607,7 +624,8 @@
 
   function resetWorkspace(ws, t) {
     var st = wsState[t.id];
-    st.files = []; st.selected = {}; st.order = []; st.rotations = {};
+    st.files = []; st.selected = {}; st.order = []; st.rotations = {}; st.thumbCache = {};
+    st._pdfJsPromise = null;
     st.annotations = []; st.currentPage = 0; st.cropRect = null;
     st.signatureDataUrl = null; st.formValues = {};
     hideResult(ws);
@@ -650,9 +668,13 @@
         }
         if (act === 'del') {
           if (t.id === 'organize') {
+            // Remove the display entry at the display index. srcIndex values are
+            // ORIGINAL page indices and MUST be preserved: organize.js process
+            // does out.copyPages(doc, [srcIndex]) against the untouched source
+            // doc, and thumbCache is keyed by original index. Remapping them to
+            // a contiguous 0..n-1 range would re-import deleted pages and show
+            // the wrong thumbnails.
             st.order.splice(idx, 1);
-            // keep srcIndex mapping valid
-            st.order.forEach(function (o, i) { o.srcIndex = i; });
           } else {
             st.selected[idx] = !st.selected[idx];
           }
@@ -703,7 +725,15 @@
       if (isNaN(from) || !item) return;
       var to = parseInt(item.getAttribute('data-idx'), 10);
       var st = wsState[t.id];
-      var arr = st.order.length ? st.order : st.files.map(function (_, i) { return { srcIndex: i, rotation: 0 }; });
+      if (!st.order || !st.order.length) {
+        if (st.totalPages) {
+          st.order = [];
+          for (var oi3 = 0; oi3 < st.totalPages; oi3++) st.order.push({ srcIndex: oi3, rotation: 0 });
+        } else {
+          st.order = st.files.map(function (_, i) { return { srcIndex: i, rotation: 0 }; });
+        }
+      }
+      var arr = st.order;
       var moved = arr.splice(from, 1)[0];
       arr.splice(to, 0, moved);
       st.order = arr;
@@ -722,68 +752,127 @@
     }
   }
 
+  /* Build a single thumbnail DOM node. srcIdx = ORIGINAL page index (thumbCache
+     key), dispIdx = display index (data-idx). Thumbnails come from the cache;
+     the grid is rebuilt synchronously so interactions never blank the grid or
+     re-rasterize pages. */
+  function buildThumbItem(st, t, srcIdx, dispIdx, thumb) {
+    var item = el('div', 'thumb-item');
+    item.setAttribute('data-idx', String(dispIdx));
+    item.draggable = t.id === 'organize';
+    var rot = 0;
+    if (t.id === 'organize') {
+      var entry = st.order[dispIdx] || { srcIndex: srcIdx, rotation: 0 };
+      rot = entry.rotation || 0;
+    } else {
+      rot = st.rotations[srcIdx] || 0;
+    }
+    if (thumb && thumb.dataUrl) {
+      var img = el('img');
+      img.src = thumb.dataUrl;
+      if (rot) img.style.transform = 'rotate(' + rot + 'deg)';
+      item.appendChild(img);
+    } else {
+      // Placeholder while the async first-load fill-in is still rendering.
+      var ph = el('span', 'thumb-ph');
+      ph.textContent = '📄';
+      ph.style.cssText = 'width:100%;padding:28px 0;text-align:center;font-size:30px;background:var(--surface-2);display:block';
+      item.appendChild(ph);
+    }
+    item.appendChild(el('span', 'thumb-num', String(dispIdx + 1)));
+    if (t.id === 'organize') {
+      var acts = el('div', 'thumb-actions');
+      acts.innerHTML =
+        '<button class="icon-btn" data-ta="rotl" title="Rotate left">↺</button>' +
+        '<button class="icon-btn" data-ta="rotr" title="Rotate right">↻</button>' +
+        '<button class="icon-btn" data-ta="del" title="Delete">✕</button>';
+      item.appendChild(acts);
+    } else if (t.id === 'rotate' || t.id === 'remove-pages' || t.id === 'split') {
+      if (st.selected[srcIdx]) item.classList.add('selected');
+      if (t.id === 'rotate') {
+        var acts2 = el('div', 'thumb-actions');
+        acts2.innerHTML =
+          '<button class="icon-btn" data-ta="rotl" title="Rotate left">↺</button>' +
+          '<button class="icon-btn" data-ta="rotr" title="Rotate right">↻</button>';
+        item.appendChild(acts2);
+      }
+    }
+    return item;
+  }
+
   function renderThumbs(ws, t) {
     var st = wsState[t.id];
     var grid = $('[data-thumbs]', ws);
     grid.innerHTML = '';
     if (!st.files.length) return;
     var file = st.files[0];
-    if (!C.libs.pdfjs) return;
-    C.loadPdfJs(file.bytes).then(function (pdfJs) {
-      var total = pdfJs.numPages;
-      st.totalPages = total;
+    if (!C.libs.pdfjs) {
+      grid.innerHTML = '<p style="color:var(--muted);font-size:13px">Could not render page previews.</p>';
+      return;
+    }
+    if (!st.thumbCache) st.thumbCache = {};
+
+    /* ---- Phase 1: synchronous DOM rebuild from the thumbnail cache ----
+       Runs on EVERY interaction. No PDF.js, no toDataURL, no async chain. */
+    var total = st.totalPages || 0;
+    if (total) {
+      // Initialize display order once for organize. Entries are PER PAGE
+      // ({ srcIndex: original page index, rotation }), so build from totalPages,
+      // not from the (1-file) st.files list.
+      if (t.id === 'organize' && (!st.order || !st.order.length)) {
+        st.order = [];
+        for (var oi = 0; oi < total; oi++) st.order.push({ srcIndex: oi, rotation: 0 });
+      }
+      var frag = document.createDocumentFragment();
+      if (t.id === 'organize') {
+        st.order.forEach(function (entry, disp) {
+          frag.appendChild(buildThumbItem(st, t, entry.srcIndex, disp, st.thumbCache[entry.srcIndex]));
+        });
+      } else {
+        for (var i = 0; i < total; i++) {
+          frag.appendChild(buildThumbItem(st, t, i, i, st.thumbCache[i]));
+        }
+      }
+      grid.appendChild(frag);
+    }
+    updateThumbInfo(ws, t);
+
+    /* ---- Phase 2: first-load fill-in ----
+       Renders each page ONCE into st.thumbCache (keyed by ORIGINAL page index),
+       progressively re-rendering the grid from the cache as pages finish so the
+       first load shows pages appearing one by one instead of blanking. If a page
+       render fails, a text placeholder goes into the cache and rendering continues. */
+    if (st._pdfJsPromise && st._thumbsFile === file) return; // fill-in already in flight (or completed)
+    st._pdfJsPromise = null; // stale promise for a different file — refill
+    st._thumbsFile = file;
+    st.thumbCache = {};
+    st._pdfJsPromise = C.loadPdfJs(file.bytes).then(function (pdfJs) {
+      st.totalPages = pdfJs.numPages;
       var chain = Promise.resolve();
-      var items = [];
-      for (var i = 1; i <= total; i++) {
-        (function (n) {
+      for (var p = 1; p <= pdfJs.numPages; p++) {
+        (function (pn) {
+          var key = pn - 1;
           chain = chain.then(function () {
-            return C.renderPageToCanvas(pdfJs, n, 0.35).then(function (r) {
-              items.push({ n: n, dataUrl: r.canvas.toDataURL('image/jpeg', 0.6) });
+            if (st.thumbCache[key]) return;
+            return C.renderPageToCanvas(pdfJs, pn, 0.35).then(function (r) {
+              // Guard: if the file was replaced while rendering, drop stale fills.
+              if (st._thumbsFile !== file) return;
+              st.thumbCache[key] = { dataUrl: r.canvas.toDataURL('image/jpeg', 0.6), w: r.canvas.width, h: r.canvas.height };
+            }).catch(function () {
+              if (st._thumbsFile === file) st.thumbCache[key] = { dataUrl: null, w: 0, h: 0 };
+            }).then(function () {
+              // Rebuild from cache so the freshly rendered page appears (and any
+              // later interaction state is preserved). Sync + cache = no flash.
+              if (st._thumbsFile === file) renderThumbs(ws, t);
             });
           });
-        })(i);
+        })(p);
       }
-      return chain.then(function () {
-        items.forEach(function (it) {
-          var idx = it.n - 1;
-          var item = el('div', 'thumb-item');
-          item.setAttribute('data-idx', String(idx));
-          item.draggable = t.id === 'organize';
-          var rot = 0;
-          if (t.id === 'organize') {
-            var entry = st.order[idx] || { srcIndex: idx, rotation: 0 };
-            rot = entry.rotation || 0;
-          } else {
-            rot = st.rotations[idx] || 0;
-          }
-          var img = el('img');
-          img.src = it.dataUrl;
-          if (rot) img.style.transform = 'rotate(' + rot + 'deg)';
-          item.appendChild(img);
-          item.appendChild(el('span', 'thumb-num', String(it.n)));
-          if (t.id === 'organize') {
-            var acts = el('div', 'thumb-actions');
-            acts.innerHTML =
-              '<button class="icon-btn" data-ta="rotl" title="Rotate left">↺</button>' +
-              '<button class="icon-btn" data-ta="rotr" title="Rotate right">↻</button>' +
-              '<button class="icon-btn" data-ta="del" title="Delete">✕</button>';
-            item.appendChild(acts);
-          } else if (t.id === 'rotate' || t.id === 'remove-pages' || t.id === 'split') {
-            if (st.selected[idx]) item.classList.add('selected');
-            if (t.id === 'rotate') {
-              var acts2 = el('div', 'thumb-actions');
-              acts2.innerHTML =
-                '<button class="icon-btn" data-ta="rotl" title="Rotate left">↺</button>' +
-                '<button class="icon-btn" data-ta="rotr" title="Rotate right">↻</button>';
-              item.appendChild(acts2);
-            }
-          }
-          grid.appendChild(item);
-        });
-        updateThumbInfo(ws, t);
-      });
+      return chain;
     }).catch(function () {
-      grid.innerHTML = '<p style="color:var(--muted);font-size:13px">Could not render page previews.</p>';
+      if (!st.totalPages) {
+        grid.innerHTML = '<p style="color:var(--muted);font-size:13px">Could not render page previews.</p>';
+      }
     });
   }
 
