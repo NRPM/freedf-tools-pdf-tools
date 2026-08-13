@@ -31,12 +31,8 @@ python -m http.server 8000
 
 ## 🔒 Privacy
 
-All document processing happens **on-device** using open-source libraries (pdf-lib, PDF.js, JSZip, Tesseract.js) loaded from a public CDN. Your files never leave your browser. The only thing stored locally is your theme preference.
+All document processing happens **on-device** using open-source libraries (pdf-lib, PDF.js, JSZip, Tesseract.js) loaded from a public CDN. Your files never leave your browser.
 
 ## 🤖 AI disclosure
 
 This project was developed with the assistance of **AI** (an AI coding agent) — including feature implementation, debugging, code review, and testing. The final code has been reviewed and verified by both automated checks and human oversight.
-
-## 📄 License
-
-All rights reserved. Free to use for personal purposes.
