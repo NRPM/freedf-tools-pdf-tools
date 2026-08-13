@@ -19,8 +19,8 @@ A live instance is running at **[https://freedftools.netlify.app](https://freedf
 Just open `index.html` in any modern browser — or serve the folder:
 
 ```bash
-python -m http.server 8123
-# then open http://localhost:8123/
+python -m http.server 8000
+# then open http://localhost:8000/
 ```
 
 ## ☁️ Deploy to GitHub Pages
