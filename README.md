@@ -10,7 +10,11 @@
 - **Dark & light themes** — dark by default, with a smooth 250 ms animated switch.
 - **No build step** — pure HTML, CSS and JavaScript. Host it anywhere, including GitHub Pages.
 
-## 🚀 Run it
+## 🚀 Try it live
+
+A live instance is running at **[https://freedftools.netlify.app](https://freedftools.netlify.app)**.
+
+## 🏠 Run it locally
 
 Just open `index.html` in any modern browser — or serve the folder:
 
