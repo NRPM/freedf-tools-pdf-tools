@@ -1,0 +1,9 @@
+# FreeDF Tools — ignore everything except the app code
+# The repository intentionally contains ONLY the runnable application:
+# index.html, css/, js/, and this README.
+
+/*
+!/index.html
+!/css/
+!/js/
+!/README.md
