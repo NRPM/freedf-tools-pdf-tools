@@ -35,4 +35,4 @@ All document processing happens **on-device** using open-source libraries (pdf-l
 
 ## 🤖 AI disclosure
 
-This project was developed with the assistance of **AI** (an AI coding agent) — including feature implementation, debugging, code review, and testing. The final code has been reviewed and verified by both automated checks and human oversight.
+This project was developed with the assistance of **AI** (an AI coding agent) — including feature implementation, debugging, code review, and testing.
